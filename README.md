@@ -1,5 +1,7 @@
 # Alpha ESS MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@michaelkrasa/alpha-ess-mcp-server)](https://smithery.ai/server/@michaelkrasa/alpha-ess-mcp-server)
+
 A comprehensive MCP (Model Context Protocol) server that provides seamless access to Alpha ESS solar inverter and battery system data through the official Alpha ESS Open API. Built
 with Python using FastMCP, this server enables AI assistants to monitor, analyze, and control Alpha ESS energy storage systems.
 
