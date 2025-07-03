@@ -678,13 +678,14 @@ async def get_charge_config(serial: Optional[str] = None) -> dict[str, Any]:
 async def get_discharge_config(serial: Optional[str] = None) -> dict[str, Any]:
     """
     Get battery discharge configuration for a specific Alpha ESS system.
+    Returns structured configuration with clear period definitions and status.
     If no serial provided, auto-selects if only one system exists.
     
     Args:
         serial: The serial number of the Alpha ESS system (optional)
         
     Returns:
-        dict: Discharge configuration with success status
+        dict: Enhanced response with structured discharge configuration
     """
     client = None
     try:
@@ -692,12 +693,13 @@ async def get_discharge_config(serial: Optional[str] = None) -> dict[str, Any]:
         if not serial:
             serial_info = await get_default_serial()
             if not serial_info['success'] or not serial_info['serial']:
-                return {
-                    "success": False,
-                    "message": f"Serial auto-discovery failed: {serial_info['message']}",
-                    "data": None,
-                    "available_systems": serial_info.get('systems', [])
-                }
+                return create_enhanced_response(
+                    success=False,
+                    message=f"Serial auto-discovery failed: {serial_info['message']}",
+                    raw_data=None,
+                    data_type="config",
+                    metadata={"available_systems": serial_info.get('systems', [])}
+                )
             serial = serial_info['serial']
 
         app_id, app_secret = get_alpha_credentials()
@@ -706,25 +708,37 @@ async def get_discharge_config(serial: Optional[str] = None) -> dict[str, Any]:
         # Get discharge config
         config = await client.getDisChargeConfigInfo(serial)
 
-        return {
-            "success": True,
-            "message": f"Successfully retrieved discharge config for {serial}",
-            "data": config,
-            "serial_used": serial
-        }
+        # Structure the config data
+        structured = structure_config_data(config, "discharge")
+
+        return create_enhanced_response(
+            success=True,
+            message=f"Successfully retrieved discharge config for {serial}",
+            raw_data=config,
+            data_type="config",
+            serial_used=serial,
+            metadata={
+                "config_type": "battery_discharging",
+                "total_periods": 2,
+                "units": {"soc": "%", "time": "HH:MM"}
+            },
+            structured_data=structured
+        )
 
     except ValueError as e:
-        return {
-            "success": False,
-            "message": f"Configuration error: {str(e)}",
-            "data": None
-        }
+        return create_enhanced_response(
+            success=False,
+            message=f"Configuration error: {str(e)}",
+            raw_data=None,
+            data_type="config"
+        )
     except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error retrieving discharge config: {str(e)}",
-            "data": None
-        }
+        return create_enhanced_response(
+            success=False,
+            message=f"Error retrieving discharge config: {str(e)}",
+            raw_data=None,
+            data_type="config"
+        )
     finally:
         if client:
             await client.close()
@@ -773,16 +787,10 @@ async def set_battery_charge(
         app_id, app_secret = get_alpha_credentials()
         client = alphaess(app_id, app_secret)
 
-        # Convert time strings to datetime.time objects
-        dp1_start_time = datetime.strptime(dp1_start, "%H:%M").time()
-        dp1_end_time = datetime.strptime(dp1_end, "%H:%M").time()
-        dp2_start_time = datetime.strptime(dp2_start, "%H:%M").time()
-        dp2_end_time = datetime.strptime(dp2_end, "%H:%M").time()
-
         # Set battery charge configuration
-        result = await client.setbatterycharge(
-            serial, enabled, dp1_start_time, dp1_end_time,
-            dp2_start_time, dp2_end_time, charge_cutoff_soc
+        result = await client.updateChargeConfigInfo(
+            serial, enabled, dp1_start, dp1_end,
+            dp2_start, dp2_end, charge_cutoff_soc
         )
 
         return {
@@ -852,16 +860,15 @@ async def set_battery_discharge(
         app_id, app_secret = get_alpha_credentials()
         client = alphaess(app_id, app_secret)
 
-        # Convert time strings to datetime.time objects
-        dp1_start_time = datetime.strptime(dp1_start, "%H:%M").time()
-        dp1_end_time = datetime.strptime(dp1_end, "%H:%M").time()
-        dp2_start_time = datetime.strptime(dp2_start, "%H:%M").time()
-        dp2_end_time = datetime.strptime(dp2_end, "%H:%M").time()
-
-        # Set battery discharge configuration
-        result = await client.setbatterydischarge(
-            serial, enabled, dp1_start_time, dp1_end_time,
-            dp2_start_time, dp2_end_time, discharge_cutoff_soc
+        # Update the discharge configuration using the proper method signature
+        result = await client.updateDisChargeConfigInfo(
+            serial,
+            discharge_cutoff_soc,  # batUseCap
+            1 if enabled else 0,  # ctrDis
+            dp1_end,
+            dp2_end,
+            dp1_start,
+            dp2_start
         )
 
         return {
@@ -890,4 +897,4 @@ async def set_battery_discharge(
 
 if __name__ == "__main__":
     # Initialize and run the server
-    mcp.run(transport='stdio')
+    mcp.run()

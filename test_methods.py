@@ -1,226 +1,330 @@
 #!/usr/bin/env python3
 """
-Test script for Alpha ESS MCP Server Enhanced Structured Outputs
-Demonstrates the new data structure improvements with analytics and clear field names.
+Alpha ESS MCP Server - Comprehensive Test Suite
+Tests all MCP tool methods with real API calls.
 """
 
 import asyncio
 import json
+import os
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
 from main import (
     authenticate_alphaess,
+    get_alpha_ess_data,
     get_ess_list,
     get_last_power_data,
     get_one_day_power_data,
-    get_charge_config
+    get_one_date_energy_data,
+    get_charge_config,
+    get_discharge_config,
+    set_battery_charge,
+    set_battery_discharge
 )
 
-
-def print_section(title: str, char: str = "="):
-    """Print a formatted section header"""
-    print(f"\n{char * 60}")
-    print(f" {title}")
-    print(f"{char * 60}")
+load_dotenv()
 
 
-def print_json_pretty(data: dict, indent: int = 2):
-    """Print JSON data with nice formatting"""
-    print(json.dumps(data, indent=indent, default=str))
-
-
-def analyze_structure_improvements(result: dict):
-    """Analyze and report on structure improvements"""
-    print(f"📊 Data Type: {result.get('data_type', 'unknown')}")
-    print(f"🕐 Timestamp: {result.get('metadata', {}).get('timestamp', 'N/A')}")
-
-    metadata = result.get('metadata', {})
-    if metadata:
-        print(f"📋 Metadata Keys: {list(metadata.keys())}")
-
-    structured = result.get('structured')
-    if structured:
-        print(f"✨ Structured Data Available: Yes")
-        print(f"🔧 Structure Type: {type(structured).__name__}")
-        if isinstance(structured, dict):
-            print(f"📝 Structured Keys: {list(structured.keys())}")
-    else:
-        print(f"✨ Structured Data Available: No")
-
-
-async def test_enhanced_structure():
-    """Test all enhanced structured outputs"""
-
-    print_section("🚀 ALPHA ESS MCP SERVER - ENHANCED STRUCTURE TESTS")
-    print("Testing new structured data formats with analytics and clear field names")
-
-    # Test 1: System List with Auto-Selection
-    print_section("1. System List with Enhanced Structure", "-")
-    try:
-        result = await get_ess_list()
-        print(f"✅ Success: {result['success']}")
-        analyze_structure_improvements(result)
-
-        structured = result.get('structured', {})
-        print(f"\n🎯 Auto-Selection Results:")
-        print(f"   Recommended Serial: {structured.get('recommended_serial')}")
-        print(f"   Requires Manual Selection: {structured.get('requires_selection')}")
-        print(f"   Total Systems: {len(structured.get('systems', []))}")
-
-    except Exception as e:
-        print(f"❌ Error: {e}")
-
-    # Test 2: Real-time Power Snapshot
-    print_section("2. Real-time Power Snapshot (Structured)", "-")
-    try:
-        result = await get_last_power_data()
-        print(f"✅ Success: {result['success']}")
-        analyze_structure_improvements(result)
-
-        structured = result.get('structured', {})
-        print(f"\n⚡ Power Snapshot Analysis:")
-
-        # Solar Analysis
-        solar = structured.get('solar', {})
-        print(f"   🌞 Solar: {solar.get('total_power', 0)}W total")
-        panels = solar.get('panels', {})
-        active_panels = sum(1 for p in panels.values() if p > 0)
-        print(f"      Active Panels: {active_panels}/4")
-
-        # Battery Analysis  
-        battery = structured.get('battery', {})
-        soc = battery.get('state_of_charge', 0)
-        power = battery.get('power', 0)
-        status = "Charging" if power > 0 else "Discharging" if power < 0 else "Idle"
-        print(f"   🔋 Battery: {soc}% SOC, {abs(power)}W {status}")
-
-        # Grid Analysis
-        grid = structured.get('grid', {})
-        grid_power = grid.get('total_power', 0)
-        grid_status = "Importing" if grid_power > 0 else "Exporting" if grid_power < 0 else "Balanced"
-        print(f"   🏠 Grid: {abs(grid_power)}W {grid_status}")
-
-        # Load Analysis
-        load = structured.get('load', {})
-        print(f"   ⚡ Load: {load.get('total_power', 0)}W consumption")
-
-    except Exception as e:
-        print(f"❌ Error: {e}")
-
-    # Test 3: Configuration with Period Analysis
-    print_section("3. Charge Configuration (Enhanced)", "-")
-    try:
-        result = await get_charge_config()
-        print(f"✅ Success: {result['success']}")
-        analyze_structure_improvements(result)
-
-        structured = result.get('structured', {})
-        print(f"\n⚙️ Configuration Analysis:")
-        print(f"   Enabled: {structured.get('enabled', False)}")
-        print(f"   Charge Limit: {structured.get('charge_limit_soc', 0)}%")
-
-        periods = structured.get('periods', [])
-        active_periods = [p for p in periods if p.get('active', False)]
-        print(f"   Active Periods: {len(active_periods)}/2")
-
-        for period in periods:
-            status = "🟢 Active" if period.get('active') else "🔴 Inactive"
-            print(f"   Period {period.get('period')}: {period.get('start_time')} - {period.get('end_time')} {status}")
-
-    except Exception as e:
-        print(f"❌ Error: {e}")
-
-    # Test 4: The Big One - Timeseries with Analytics
-    print_section("4. Timeseries Data (MAJOR IMPROVEMENT)", "-")
-    try:
-        result = await get_one_day_power_data('2024-01-15')
-        print(f"✅ Success: {result['success']}")
-        analyze_structure_improvements(result)
-
-        # Show the efficiency improvement
-        raw_data = result.get('data', [])
-        structured = result.get('structured', {})
-
-        print(f"\n📈 Data Efficiency Comparison:")
-        print(f"   Raw Data Size: {len(json.dumps(raw_data))} characters")
-        print(f"   Structured Size: {len(json.dumps(structured))} characters")
-
-        # Serial redundancy elimination
-        if raw_data:
-            serial_mentions = json.dumps(raw_data).count('AE3100521030061')
-            print(f"   Serial Redundancy: {serial_mentions} mentions eliminated!")
-
-        # Show analytics
-        summary = structured.get('summary', {})
-        print(f"\n🔍 Automatic Analytics Generated:")
-        print(f"   📊 Total Records: {summary.get('total_records', 0)}")
-        print(f"   ⏱️  Interval: {summary.get('interval_minutes', 0)} minutes")
-        print(f"   🕐 Time Span: {summary.get('time_span_hours', 0)} hours")
-
-        # Solar insights
-        solar_summary = summary.get('solar', {})
-        print(f"\n   🌞 Solar Analytics:")
-        print(f"      Peak Power: {solar_summary.get('peak_power', 0):,.0f}W")
-        print(f"      Average Power: {solar_summary.get('avg_power', 0):,.0f}W")
-        print(f"      Total Generation: {solar_summary.get('total_generation_kwh', 0):.2f} kWh")
-
-        # Battery insights
-        battery_summary = summary.get('battery', {})
-        print(f"\n   🔋 Battery Analytics:")
-        print(f"      Max SOC: {battery_summary.get('max_soc', 0):.1f}%")
-        print(f"      Min SOC: {battery_summary.get('min_soc', 0):.1f}%")
-        print(f"      Average SOC: {battery_summary.get('avg_soc', 0):.1f}%")
-
-        # Load insights
-        load_summary = summary.get('load', {})
-        print(f"\n   ⚡ Load Analytics:")
-        print(f"      Peak Consumption: {load_summary.get('peak_power', 0):,.0f}W")
-        print(f"      Average Consumption: {load_summary.get('avg_power', 0):,.0f}W")
-        print(f"      Total Consumption: {load_summary.get('total_consumption_kwh', 0):.2f} kWh")
-
-        # Grid insights
-        grid_summary = summary.get('grid', {})
-        print(f"\n   🏠 Grid Analytics:")
-        print(f"      Total Feed-in: {grid_summary.get('total_feedin_kwh', 0):.2f} kWh")
-        print(f"      Peak Feed-in: {grid_summary.get('peak_feedin', 0):,.0f}W")
-
-        # Show sample of structured vs raw
-        print(f"\n🔄 Data Structure Comparison:")
-        print(f"   Raw Sample (old): {raw_data[0] if raw_data else 'No data'}")
-
-        series = structured.get('series', [])
-        if series:
-            print(f"   Structured Sample (new): {series[0]}")
-
-    except Exception as e:
-        print(f"❌ Error: {e}")
-
-    # Test 5: Authentication (Simple Structure)
-    print_section("5. Authentication (Enhanced Response)", "-")
-    try:
-        result = await authenticate_alphaess()
-        print(f"✅ Success: {result['success']}")
-        if result.get('data_type'):
-            analyze_structure_improvements(result)
+class AlphaESSTestSuite:
+    """Comprehensive test suite for all Alpha ESS MCP Server methods"""
+    
+    def __init__(self):
+        self.serial = None
+        self.results = []
+        self.total_tests = 0
+        self.passed_tests = 0
+        
+    def check_credentials(self):
+        """Check if credentials are available"""
+        app_id = os.getenv('ALPHA_ESS_APP_ID')
+        app_secret = os.getenv('ALPHA_ESS_APP_SECRET')
+        
+        if not app_id or not app_secret:
+            print("ERROR: Missing Alpha ESS credentials in .env file")
+            return False
+        return True
+    
+    def log_result(self, test_name, success, message=""):
+        """Log test result"""
+        self.total_tests += 1
+        if success:
+            self.passed_tests += 1
+            print(f"PASS: {test_name}")
         else:
-            print("📝 Note: Authentication uses simplified structure")
+            print(f"FAIL: {test_name} - {message}")
+        
+        if message and success:
+            print(f"  {message}")
+    
+    async def test_authenticate(self):
+        """Test authentication method"""
+        try:
+            result = await authenticate_alphaess()
+            success = result['success']
+            message = "Authentication successful" if success else result['message']
+            self.log_result("authenticate_alphaess", success, message)
+            return success
+        except Exception as e:
+            self.log_result("authenticate_alphaess", False, f"Exception: {str(e)}")
+            return False
+    
+    async def test_get_alpha_ess_data(self):
+        """Test get_alpha_ess_data method"""
+        try:
+            result = await get_alpha_ess_data()
+            success = result['success']
+            message = "Statistical data retrieved" if success else result['message']
+            self.log_result("get_alpha_ess_data", success, message)
+            return success
+        except Exception as e:
+            self.log_result("get_alpha_ess_data", False, f"Exception: {str(e)}")
+            return False
+    
+    async def test_get_ess_list(self):
+        """Test get_ess_list method and extract serial for other tests"""
+        try:
+            result = await get_ess_list()
+            success = result['success']
+            
+            if success:
+                structured = result.get('structured', {})
+                systems = structured.get('systems', [])
+                recommended_serial = structured.get('recommended_serial')
+                
+                # Store serial for other tests
+                if recommended_serial:
+                    self.serial = recommended_serial
+                elif systems:
+                    self.serial = systems[0].get('serial')
+                
+                message = f"Found {len(systems)} systems, using serial: {self.serial}"
+                self.log_result("get_ess_list", success, message)
+            else:
+                self.log_result("get_ess_list", success, result['message'])
+            
+            return success
+        except Exception as e:
+            self.log_result("get_ess_list", False, f"Exception: {str(e)}")
+            return False
+    
+    async def test_get_last_power_data(self):
+        """Test get_last_power_data method"""
+        try:
+            result = await get_last_power_data(self.serial)
+            success = result['success']
+            
+            if success:
+                structured = result.get('structured', {})
+                solar = structured.get('solar', {}).get('total_power', 0)
+                battery = structured.get('battery', {}).get('state_of_charge', 0)
+                message = f"Solar: {solar}W, Battery: {battery}%"
+            else:
+                message = result['message']
+            
+            self.log_result("get_last_power_data", success, message)
+            return success
+        except Exception as e:
+            self.log_result("get_last_power_data", False, f"Exception: {str(e)}")
+            return False
+    
+    async def test_get_one_day_power_data(self):
+        """Test get_one_day_power_data method"""
+        try:
+            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            result = await get_one_day_power_data(yesterday, self.serial)
+            success = result['success']
+            
+            if success:
+                structured = result.get('structured', {})
+                series = structured.get('series', [])
+                summary = structured.get('summary', {})
+                solar_kwh = summary.get('solar', {}).get('total_generation_kwh', 0)
+                message = f"Retrieved {len(series)} data points, {solar_kwh:.2f} kWh solar"
+            else:
+                message = result['message']
+            
+            self.log_result("get_one_day_power_data", success, message)
+            return success
+        except Exception as e:
+            self.log_result("get_one_day_power_data", False, f"Exception: {str(e)}")
+            return False
+    
+    async def test_get_one_date_energy_data(self):
+        """Test get_one_date_energy_data method"""
+        try:
+            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            result = await get_one_date_energy_data(yesterday, self.serial)
+            success = result['success']
+            message = f"Energy data for {yesterday}" if success else result['message']
+            self.log_result("get_one_date_energy_data", success, message)
+            return success
+        except Exception as e:
+            self.log_result("get_one_date_energy_data", False, f"Exception: {str(e)}")
+            return False
+    
+    async def test_get_charge_config(self):
+        """Test get_charge_config method"""
+        try:
+            result = await get_charge_config(self.serial)
+            success = result['success']
+            
+            if success:
+                structured = result.get('structured', {})
+                enabled = structured.get('enabled', False)
+                limit = structured.get('charge_limit_soc', 0)
+                message = f"Enabled: {enabled}, Limit: {limit}%"
+            else:
+                message = result['message']
+            
+            self.log_result("get_charge_config", success, message)
+            return success
+        except Exception as e:
+            self.log_result("get_charge_config", False, f"Exception: {str(e)}")
+            return False
+    
+    async def test_get_discharge_config(self):
+        """Test get_discharge_config method"""
+        try:
+            result = await get_discharge_config(self.serial)
+            success = result['success']
+            
+            if success:
+                structured = result.get('structured', {})
+                enabled = structured.get('enabled', False)
+                limit = structured.get('discharge_limit_soc', 0)
+                message = f"Enabled: {enabled}, Limit: {limit}%"
+            else:
+                message = result['message']
+            
+            self.log_result("get_discharge_config", success, message)
+            return success
+        except Exception as e:
+            self.log_result("get_discharge_config", False, f"Exception: {str(e)}")
+            return False
+    
+    async def test_set_battery_charge(self):
+        """Test set_battery_charge method (non-disruptive)"""
+        try:
+            # Get current config first
+            current_config = await get_charge_config(self.serial)
+            if not current_config['success']:
+                self.log_result("set_battery_charge", False, "Cannot get current config")
+                return False
+            
+            # Extract current settings
+            structured = current_config.get('structured', {})
+            enabled = structured.get('enabled', False)
+            limit = structured.get('charge_limit_soc', 100)
+            periods = structured.get('periods', [])
+            
+            period1 = periods[0] if len(periods) > 0 else {'start_time': '00:00', 'end_time': '00:00'}
+            period2 = periods[1] if len(periods) > 1 else {'start_time': '00:00', 'end_time': '00:00'}
+            
+            # Set same configuration (no actual change)
+            result = await set_battery_charge(
+                enabled=enabled,
+                dp1_start=period1['start_time'],
+                dp1_end=period1['end_time'],
+                dp2_start=period2['start_time'],
+                dp2_end=period2['end_time'],
+                charge_cutoff_soc=limit,
+                serial=self.serial
+            )
+            
+            success = result['success']
+            message = f"Set charge config (no change)" if success else result['message']
+            self.log_result("set_battery_charge", success, message)
+            return success
+        except Exception as e:
+            self.log_result("set_battery_charge", False, f"Exception: {str(e)}")
+            return False
+    
+    async def test_set_battery_discharge(self):
+        """Test set_battery_discharge method (non-disruptive)"""
+        try:
+            # Get current config first
+            current_config = await get_discharge_config(self.serial)
+            if not current_config['success']:
+                self.log_result("set_battery_discharge", False, "Cannot get current config")
+                return False
+            
+            # Extract current settings
+            structured = current_config.get('structured', {})
+            enabled = structured.get('enabled', False)
+            limit = structured.get('discharge_limit_soc', 10)
+            periods = structured.get('periods', [])
+            
+            period1 = periods[0] if len(periods) > 0 else {'start_time': '00:00', 'end_time': '00:00'}
+            period2 = periods[1] if len(periods) > 1 else {'start_time': '00:00', 'end_time': '00:00'}
+            
+            # Set same configuration (no actual change)
+            result = await set_battery_discharge(
+                enabled=enabled,
+                dp1_start=period1['start_time'],
+                dp1_end=period1['end_time'],
+                dp2_start=period2['start_time'],
+                dp2_end=period2['end_time'],
+                discharge_cutoff_soc=limit,
+                serial=self.serial
+            )
+            
+            success = result['success']
+            message = f"Set discharge config (no change)" if success else result['message']
+            self.log_result("set_battery_discharge", success, message)
+            return success
+        except Exception as e:
+            self.log_result("set_battery_discharge", False, f"Exception: {str(e)}")
+            return False
+    
+    async def run_all_tests(self):
+        """Run all tests in sequence"""
+        print("Alpha ESS MCP Server - Comprehensive Test Suite")
+        print("=" * 50)
+        
+        if not self.check_credentials():
+            return False
+        
+        # Test authentication first
+        if not await self.test_authenticate():
+            print("Authentication failed - stopping tests")
+            return False
+        
+        # Get system list and serial
+        if not await self.test_get_ess_list():
+            print("Cannot get system list - stopping tests")
+            return False
+        
+        # Test all other methods
+        await self.test_get_alpha_ess_data()
+        await self.test_get_last_power_data()
+        await self.test_get_one_day_power_data()
+        await self.test_get_one_date_energy_data()
+        await self.test_get_charge_config()
+        await self.test_get_discharge_config()
+        await self.test_set_battery_charge()
+        await self.test_set_battery_discharge()
+        
+        # Print summary
+        print("=" * 50)
+        print(f"Tests completed: {self.passed_tests}/{self.total_tests}")
+        print(f"Success rate: {(self.passed_tests/self.total_tests)*100:.1f}%")
+        
+        if self.passed_tests == self.total_tests:
+            print("ALL TESTS PASSED")
+            return True
+        else:
+            print(f"{self.total_tests - self.passed_tests} tests failed")
+            return False
 
-    except Exception as e:
-        print(f"❌ Error: {e}")
 
-    # Summary
-    print_section("🎉 STRUCTURE ENHANCEMENT SUMMARY")
-    print("✅ All enhanced structures working perfectly!")
-    print("\n📊 Key Improvements Delivered:")
-    print("   🏷️  Clear field names (ppv → solar_power, cbat → battery_soc)")
-    print("   📈 Automatic analytics and summaries")
-    print("   🔍 Rich metadata with units and timestamps")
-    print("   💾 Dual access (raw + structured)")
-    print("   ⚡ Eliminated redundancy (288 serial repetitions → 1 metadata field)")
-    print("   🤖 AI-agent friendly structure")
-    print("   📱 Better UX with data type classification")
-
-    print("\n🚀 Ready for production use with AI agents!")
+async def main():
+    """Run the comprehensive test suite"""
+    test_suite = AlphaESSTestSuite()
+    success = await test_suite.run_all_tests()
+    return success
 
 
 if __name__ == "__main__":
-    asyncio.run(test_enhanced_structure())
+    success = asyncio.run(main())
+    exit(0 if success else 1)
