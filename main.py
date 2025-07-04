@@ -897,4 +897,9 @@ async def set_battery_discharge(
 
 if __name__ == "__main__":
     # Initialize and run the server
-    mcp.run()
+    # Support both stdio (local) and HTTP (Smithery) transports
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--http":
+        mcp.run(transport="http", port=8000)
+    else:
+        mcp.run()
