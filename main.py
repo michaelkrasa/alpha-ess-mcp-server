@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 load_dotenv()
 
-mcp = FastMCP("alpha-ess-mcp")
+mcp = FastMCP("alpha-ess")
 
 # Data type definitions for better structure
 DataType = Literal["timeseries", "config", "snapshot", "summary", "system_list"]
@@ -896,10 +896,4 @@ async def set_battery_discharge(
 
 
 if __name__ == "__main__":
-    # Initialize and run the server
-    # Support both stdio (local) and HTTP (Smithery) transports
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "--http":
-        mcp.run(transport="http", port=8000)
-    else:
-        mcp.run()
+    mcp.run()
