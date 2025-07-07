@@ -6,6 +6,15 @@ A Model Context Protocol (MCP) server that provides access to Alpha ESS solar in
 
 ## Installation
 
+### Installing via Smithery
+
+To install Alpha ESS Solar Energy System Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@michaelkrasa/alpha-ess-mcp-server):
+
+```bash
+npx -y @smithery/cli install @michaelkrasa/alpha-ess-mcp-server --client claude
+```
+
+### Manual Installation
 ```bash
 uv sync
 ```
