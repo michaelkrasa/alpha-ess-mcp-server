@@ -139,8 +139,32 @@ class AlphaESSTestSuite:
                 structured = result.get('structured', {})
                 series = structured.get('series', [])
                 summary = structured.get('summary', {})
+                
+                # Verify hourly data structure
+                if series:
+                    first_record = series[0]
+                    expected_keys = {'timestamp', 'solar_power', 'load_power', 'battery_soc', 
+                                   'grid_feedin', 'grid_import', 'ev_charging'}
+                    if not all(key in first_record for key in expected_keys):
+                        self.log_result("get_one_day_power_data", False, "Missing expected data fields")
+                        return False
+                    
+                    # Verify hourly timestamps
+                    for record in series:
+                        if not record['timestamp'].endswith(':00:00'):
+                            self.log_result("get_one_day_power_data", False, "Non-hourly timestamp found")
+                            return False
+                
+                # Check summary structure
                 solar_kwh = summary.get('solar', {}).get('total_generation_kwh', 0)
-                message = f"Retrieved {len(series)} data points, {solar_kwh:.2f} kWh solar"
+                interval = summary.get('interval')
+                
+                if interval != "1 hour":
+                    self.log_result("get_one_day_power_data", False, "Incorrect interval in summary")
+                    return False
+                
+                message = (f"Retrieved {len(series)} hourly records, "
+                          f"{solar_kwh:.2f} kWh solar generation")
             else:
                 message = result['message']
             
@@ -148,6 +172,43 @@ class AlphaESSTestSuite:
             return success
         except Exception as e:
             self.log_result("get_one_day_power_data", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_get_one_day_power_data_for_different_dates(self):
+        """Test get_one_day_power_data for different dates to ensure data varies"""
+        try:
+            # Get data for one week ago
+            date1_str = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+            result1 = await get_one_day_power_data(date1_str, self.serial)
+
+            # Get data for two weeks ago
+            date2_str = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+            result2 = await get_one_day_power_data(date2_str, self.serial)
+
+            # Check if both calls were successful
+            if not (result1['success'] and result2['success']):
+                self.log_result("get_one_day_power_data_for_different_dates", False,
+                                "API calls for different dates failed")
+                return False
+
+            # Extract the 'total_generation_kwh' value from the data
+            kwh1 = result1.get('structured', {}).get('summary', {}).get('solar', {}).get(
+                'total_generation_kwh', 0)
+            kwh2 = result2.get('structured', {}).get('summary', {}).get('solar', {}).get(
+                'total_generation_kwh', 0)
+
+            # Assert that the values are not the same
+            if kwh1 != kwh2:
+                self.log_result("get_one_day_power_data_for_different_dates", True,
+                                f"kWh for {date1_str} ({kwh1}) differs from {date2_str} ({kwh2})")
+                return True
+            else:
+                self.log_result("get_one_day_power_data_for_different_dates", False,
+                                f"kWh for {date1_str} ({kwh1}) is the same as {date2_str} ({kwh2})")
+                return False
+
+        except Exception as e:
+            self.log_result("get_one_day_power_data_for_different_dates", False, f"Exception: {str(e)}")
             return False
     
     async def test_get_one_date_energy_data(self):
@@ -161,6 +222,76 @@ class AlphaESSTestSuite:
             return success
         except Exception as e:
             self.log_result("get_one_date_energy_data", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_get_one_date_energy_data_for_different_dates(self):
+        """Test get_one_date_energy_data for different dates to ensure data varies"""
+        try:
+            # Get data for one week ago
+            date1_str = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+            result1 = await get_one_date_energy_data(date1_str, self.serial)
+
+            # Get data for two weeks ago
+            date2_str = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+            result2 = await get_one_date_energy_data(date2_str, self.serial)
+
+            # Check if both calls were successful
+            if not (result1['success'] and result2['success']):
+                self.log_result("get_one_date_energy_data_for_different_dates", False,
+                                "API calls for different dates failed")
+                return False
+
+            # Extract the 'epv' value from the data
+            power1 = result1.get('data', {}).get('epv', 0)
+            power2 = result2.get('data', {}).get('epv', 0)
+
+            # Assert that the values are not the same
+            if power1 != power2:
+                self.log_result("get_one_date_energy_data_for_different_dates", True,
+                                f"Power for {date1_str} ({power1}) differs from {date2_str} ({power2})")
+                return True
+            else:
+                self.log_result("get_one_date_energy_data_for_different_dates", False,
+                                f"Power for {date1_str} ({power1}) is the same as {date2_str} ({power2})")
+                return False
+
+        except Exception as e:
+            self.log_result("get_one_date_energy_data_for_different_dates", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_get_one_date_energy_data_for_different_dates(self):
+        """Test get_one_date_energy_data for different dates to ensure data varies"""
+        try:
+            # Get data for yesterday
+            yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            yesterday_result = await get_one_date_energy_data(yesterday_str, self.serial)
+
+            # Get data for the day before yesterday
+            day_before_str = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+            day_before_result = await get_one_date_energy_data(day_before_str, self.serial)
+
+            # Check if both calls were successful
+            if not (yesterday_result['success'] and day_before_result['success']):
+                self.log_result("get_one_date_energy_data_for_different_dates", False,
+                                "API calls for different dates failed")
+                return False
+
+            # Extract the 'epv' value from the data
+            yesterday_power = yesterday_result.get('data', {}).get('epv', 0)
+            day_before_power = day_before_result.get('data', {}).get('epv', 0)
+
+            # Assert that the values are not the same
+            if yesterday_power != day_before_power:
+                self.log_result("get_one_date_energy_data_for_different_dates", True,
+                                f"Yesterday's power ({yesterday_power}) differs from the day before's ({day_before_power})")
+                return True
+            else:
+                self.log_result("get_one_date_energy_data_for_different_dates", False,
+                                f"Yesterday's power ({yesterday_power}) is the same as the day before's ({day_before_power})")
+                return False
+
+        except Exception as e:
+            self.log_result("get_one_date_energy_data_for_different_dates", False, f"Exception: {str(e)}")
             return False
     
     async def test_get_charge_config(self):
@@ -300,6 +431,7 @@ class AlphaESSTestSuite:
         await self.test_get_last_power_data()
         await self.test_get_one_day_power_data()
         await self.test_get_one_date_energy_data()
+        await self.test_get_one_date_energy_data_for_different_dates()
         await self.test_get_charge_config()
         await self.test_get_discharge_config()
         await self.test_set_battery_charge()

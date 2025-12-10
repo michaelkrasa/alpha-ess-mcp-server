@@ -5,8 +5,17 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "alphaessopenapi>=0.0.15",
+    "alphaessopenapi>=0.0.17",
+]
+
+[tool.setuptools]
+py-modules = ["main", "test_main", "models"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.2.2",
     "mcp[cli]>=1.10.1",
+    "alphaessopenapi>=0.0.17",
     "aiohttp>=3.8.0",
     "python-dotenv>=1.0.0",
     "voluptuous>=0.13.0",

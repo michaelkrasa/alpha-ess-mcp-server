@@ -1,10 +1,17 @@
 import os
+from dataclasses import asdict, is_dataclass
 from datetime import datetime
-from typing import Any, Optional, Literal, Dict, List
+from typing import Any, Optional, Literal, Dict, List, Union
 
 from alphaess.alphaess import alphaess
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+
+from models import (
+    TimeSeries, TimeSeriesEntry, TimeSeriesSummary,
+    ChargeConfig, DischargeConfig, ConfigPeriod,
+    Snapshot, SystemInfo, SystemList
+)
 
 load_dotenv()
 
@@ -37,117 +44,143 @@ def create_enhanced_response(
     }
 
     if structured_data is not None:
-        response["structured"] = structured_data
+        if is_dataclass(structured_data):
+            response["structured"] = asdict(structured_data)
+        else:
+            response["structured"] = structured_data
 
     return response
 
 
-def structure_timeseries_data(raw_data: List[Dict], serial: str) -> Dict[str, Any]:
-    """Convert inefficient timeseries to structured format"""
+def structure_timeseries_data(raw_data: List[Dict], serial: str) -> TimeSeries:
+    """Convert inefficient timeseries to structured format with hourly aggregation"""
     if not raw_data:
-        return {"series": [], "summary": {}}
+        return TimeSeries(series=[], summary=TimeSeriesSummary(total_records=0, interval="1 hour", time_span_hours=0, solar={}, battery={}, grid={}, load={}))
 
-    # Extract time series data (remove redundant serial)
-    series = []
+    # Group data by hour
+    hourly_data = {}
     for record in raw_data:
-        # Convert timestamp and remove redundant fields
         timestamp = record.get('uploadTime', '')
-        series.append({
-            "timestamp": timestamp,
-            "solar_power": record.get('ppv', 0),  # W
-            "load_power": record.get('load', 0),  # W  
-            "battery_soc": record.get('cbat', 0),  # %
-            "grid_feedin": record.get('feedIn', 0),  # W
-            "grid_import": record.get('gridCharge', 0),  # W
-            "ev_charging": record.get('pchargingPile', 0)  # W
-        })
+        if not timestamp:
+            continue
 
-    # Calculate summary statistics
-    solar_values = [r['solar_power'] for r in series]
-    load_values = [r['load_power'] for r in series]
-    battery_values = [r['battery_soc'] for r in series]
-    feedin_values = [r['grid_feedin'] for r in series]
+        # Extract hour from timestamp (assumes format like "2024-03-21 14:30:00")
+        hour = timestamp[:13] + ":00:00"  # Truncate to hour
 
-    summary = {
-        "total_records": len(series),
-        "interval_minutes": 10,
-        "time_span_hours": len(series) * 10 / 60,
-        "solar": {
+        if hour not in hourly_data:
+            hourly_data[hour] = {
+                "solar_power": [],
+                "load_power": [],
+                "battery_soc": [],
+                "grid_feedin": [],
+                "grid_import": [],
+                "ev_charging": []
+            }
+
+        # Collect all values for this hour
+        hourly_data[hour]["solar_power"].append(record.get('ppv', 0))
+        hourly_data[hour]["load_power"].append(record.get('load', 0))
+        hourly_data[hour]["battery_soc"].append(record.get('cbat', 0))
+        hourly_data[hour]["grid_feedin"].append(record.get('feedIn', 0))
+        hourly_data[hour]["grid_import"].append(record.get('gridCharge', 0))
+        hourly_data[hour]["ev_charging"].append(record.get('pchargingPile', 0))
+
+    # Convert hourly data to averages
+    series_entries = []
+    for hour, data in sorted(hourly_data.items()):
+        series_entries.append(TimeSeriesEntry(
+            timestamp=hour,
+            solar_power=round(sum(data["solar_power"]) / len(data["solar_power"])) if data["solar_power"] else 0,
+            load_power=round(sum(data["load_power"]) / len(data["load_power"])) if data["load_power"] else 0,
+            battery_soc=round(sum(data["battery_soc"]) / len(data["battery_soc"]), 1) if data["battery_soc"] else 0,
+            grid_feedin=round(sum(data["grid_feedin"]) / len(data["grid_feedin"])) if data["grid_feedin"] else 0,
+            grid_import=round(sum(data["grid_import"]) / len(data["grid_import"])) if data["grid_import"] else 0,
+            ev_charging=round(sum(data["ev_charging"]) / len(data["ev_charging"])) if data["ev_charging"] else 0
+        ))
+
+    # Calculate summary statistics using hourly averages
+    solar_values = [r.solar_power for r in series_entries]
+    load_values = [r.load_power for r in series_entries]
+    battery_values = [r.battery_soc for r in series_entries]
+    feedin_values = [r.grid_feedin for r in series_entries]
+
+    summary = TimeSeriesSummary(
+        total_records=len(series_entries),
+        interval="1 hour",
+        time_span_hours=len(series_entries),
+        solar={
             "peak_power": max(solar_values) if solar_values else 0,
-            "avg_power": sum(solar_values) / len(solar_values) if solar_values else 0,
-            "total_generation_kwh": sum(solar_values) * 10 / 60 / 1000  # Convert W*10min to kWh
+            "avg_power": round(sum(solar_values) / len(solar_values)) if solar_values else 0,
+            "total_generation_kwh": round(sum(solar_values) / 1000, 2)  # Convert W to kWh
         },
-        "battery": {
+        battery={
             "max_soc": max(battery_values) if battery_values else 0,
             "min_soc": min(battery_values) if battery_values else 0,
-            "avg_soc": sum(battery_values) / len(battery_values) if battery_values else 0
+            "avg_soc": round(sum(battery_values) / len(battery_values), 1) if battery_values else 0
         },
-        "grid": {
-            "total_feedin_kwh": sum(feedin_values) * 10 / 60 / 1000,
+        grid={
+            "total_feedin_kwh": round(sum(feedin_values) / 1000, 2),
             "peak_feedin": max(feedin_values) if feedin_values else 0
         },
-        "load": {
+        load={
             "peak_power": max(load_values) if load_values else 0,
-            "avg_power": sum(load_values) / len(load_values) if load_values else 0,
-            "total_consumption_kwh": sum(load_values) * 10 / 60 / 1000
+            "avg_power": round(sum(load_values) / len(load_values)) if load_values else 0,
+            "total_consumption_kwh": round(sum(load_values) / 1000, 2)
         }
-    }
+    )
 
-    return {
-        "series": series,
-        "summary": summary
-    }
+    return TimeSeries(series=series_entries, summary=summary)
 
 
-def structure_config_data(raw_data: Dict[str, Any], config_type: str) -> Dict[str, Any]:
+def structure_config_data(raw_data: Dict[str, Any], config_type: str) -> Union[ChargeConfig, DischargeConfig, Dict]:
     """Structure configuration data with better field names"""
     if config_type == "charge":
-        return {
-            "enabled": bool(raw_data.get('gridCharge', 0)),
-            "periods": [
-                {
-                    "period": 1,
-                    "start_time": raw_data.get('timeChaf1', '00:00'),
-                    "end_time": raw_data.get('timeChae1', '00:00'),
-                    "active": raw_data.get('timeChaf1', '00:00') != '00:00' or raw_data.get('timeChae1', '00:00') != '00:00'
-                },
-                {
-                    "period": 2,
-                    "start_time": raw_data.get('timeChaf2', '00:00'),
-                    "end_time": raw_data.get('timeChae2', '00:00'),
-                    "active": raw_data.get('timeChaf2', '00:00') != '00:00' or raw_data.get('timeChae2', '00:00') != '00:00'
-                }
+        return ChargeConfig(
+            enabled=bool(raw_data.get('gridCharge', 0)),
+            periods=[
+                ConfigPeriod(
+                    period=1,
+                    start_time=raw_data.get('timeChaf1', '00:00'),
+                    end_time=raw_data.get('timeChae1', '00:00'),
+                    active=raw_data.get('timeChaf1', '00:00') != '00:00' or raw_data.get('timeChae1', '00:00') != '00:00'
+                ),
+                ConfigPeriod(
+                    period=2,
+                    start_time=raw_data.get('timeChaf2', '00:00'),
+                    end_time=raw_data.get('timeChae2', '00:00'),
+                    active=raw_data.get('timeChaf2', '00:00') != '00:00' or raw_data.get('timeChae2', '00:00') != '00:00'
+                )
             ],
-            "charge_limit_soc": raw_data.get('batHighCap', 100),
-            "units": {"soc": "%", "time": "HH:MM"}
-        }
+            charge_limit_soc=raw_data.get('batHighCap', 100),
+            units={"soc": "%", "time": "HH:MM"}
+        )
     elif config_type == "discharge":
-        return {
-            "enabled": bool(raw_data.get('ctrDis', 0)),
-            "periods": [
-                {
-                    "period": 1,
-                    "start_time": raw_data.get('timeDisf1', '00:00'),
-                    "end_time": raw_data.get('timeDise1', '00:00'),
-                    "active": raw_data.get('timeDisf1', '00:00') != '00:00' or raw_data.get('timeDise1', '00:00') != '00:00'
-                },
-                {
-                    "period": 2,
-                    "start_time": raw_data.get('timeDisf2', '00:00'),
-                    "end_time": raw_data.get('timeDise2', '00:00'),
-                    "active": raw_data.get('timeDisf2', '00:00') != '00:00' or raw_data.get('timeDise2', '00:00') != '00:00'
-                }
+        return DischargeConfig(
+            enabled=bool(raw_data.get('ctrDis', 0)),
+            periods=[
+                ConfigPeriod(
+                    period=1,
+                    start_time=raw_data.get('timeDisf1', '00:00'),
+                    end_time=raw_data.get('timeDise1', '00:00'),
+                    active=raw_data.get('timeDisf1', '00:00') != '00:00' or raw_data.get('timeDise1', '00:00') != '00:00'
+                ),
+                ConfigPeriod(
+                    period=2,
+                    start_time=raw_data.get('timeDisf2', '00:00'),
+                    end_time=raw_data.get('timeDise2', '00:00'),
+                    active=raw_data.get('timeDisf2', '00:00') != '00:00' or raw_data.get('timeDise2', '00:00') != '00:00'
+                )
             ],
-            "discharge_limit_soc": raw_data.get('batUseCap', 10),
-            "units": {"soc": "%", "time": "HH:MM"}
-        }
+            discharge_limit_soc=raw_data.get('batUseCap', 10),
+            units={"soc": "%", "time": "HH:MM"}
+        )
     return raw_data
 
 
-def structure_snapshot_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
+def structure_snapshot_data(raw_data: Dict[str, Any]) -> Snapshot:
     """Structure real-time snapshot data with clear field names"""
-    return {
-        "solar": {
+    return Snapshot(
+        solar={
             "total_power": raw_data.get('ppv', 0),
             "panels": {
                 "panel_1": raw_data.get('ppvDetail', {}).get('ppv1', 0),
@@ -156,11 +189,11 @@ def structure_snapshot_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
                 "panel_4": raw_data.get('ppvDetail', {}).get('ppv4', 0)
             }
         },
-        "battery": {
+        battery={
             "state_of_charge": raw_data.get('soc', 0),
             "power": raw_data.get('pbat', 0)  # Positive = charging, Negative = discharging
         },
-        "grid": {
+        grid={
             "total_power": raw_data.get('pgrid', 0),  # Positive = importing, Negative = exporting
             "phases": {
                 "l1_power": raw_data.get('pgridDetail', {}).get('pmeterL1', 0),
@@ -168,7 +201,7 @@ def structure_snapshot_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
                 "l3_power": raw_data.get('pgridDetail', {}).get('pmeterL3', 0)
             }
         },
-        "load": {
+        load={
             "total_power": raw_data.get('pload', 0),
             "phases": {
                 "l1_real": raw_data.get('prealL1', 0),
@@ -176,7 +209,7 @@ def structure_snapshot_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
                 "l3_real": raw_data.get('prealL3', 0)
             }
         },
-        "ev_charging": {
+        ev_charging={
             "total_power": raw_data.get('pev', 0),
             "stations": {
                 "ev1": raw_data.get('pevDetail', {}).get('ev1Power', 0),
@@ -185,11 +218,12 @@ def structure_snapshot_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
                 "ev4": raw_data.get('pevDetail', {}).get('ev4Power', 0)
             }
         },
-        "units": {
+        units={
             "power": "W",
             "soc": "%"
         }
-    }
+    )
+
 
 
 def get_alpha_credentials():
@@ -380,6 +414,18 @@ async def get_ess_list() -> dict[str, Any]:
     serial_info = await get_default_serial()
 
     if serial_info['success']:
+        systems = [SystemInfo(
+            serial=s.get('sysSn'),
+            name=s.get('sysName', 'Unknown'),
+            status=s.get('sysStatus', 'Unknown')
+        ) for s in serial_info['systems']]
+
+        structured = SystemList(
+            recommended_serial=serial_info.get('serial'),
+            systems=systems,
+            requires_selection=serial_info.get('serial') is None
+        )
+
         return create_enhanced_response(
             success=True,
             message=serial_info['message'],
@@ -390,11 +436,7 @@ async def get_ess_list() -> dict[str, Any]:
                 "auto_selected_serial": serial_info.get('serial'),
                 "selection_strategy": "single_system_auto" if serial_info.get('serial') else "multiple_systems_manual"
             },
-            structured_data={
-                "recommended_serial": serial_info.get('serial'),
-                "systems": serial_info['systems'],
-                "requires_selection": serial_info.get('serial') is None
-            }
+            structured_data=structured
         )
     else:
         return create_enhanced_response(
@@ -479,7 +521,7 @@ async def get_last_power_data(serial: Optional[str] = None) -> dict[str, Any]:
 async def get_one_day_power_data(query_date: str, serial: Optional[str] = None) -> dict[str, Any]:
     """
     Get one day's power data for a specific Alpha ESS system.
-    Returns structured timeseries data with 10-minute intervals and summary statistics.
+    Returns structured timeseries data with hourly intervals and summary statistics.
     If no serial provided, auto-selects if only one system exists.
     
     Args:
@@ -516,13 +558,13 @@ async def get_one_day_power_data(query_date: str, serial: Optional[str] = None) 
         return create_enhanced_response(
             success=True,
             message=f"Successfully retrieved power data for {serial} on {query_date}",
-            raw_data=power_data,
+            raw_data=None,  # Don't include raw data to reduce verbosity
             data_type="timeseries",
             serial_used=serial,
             metadata={
                 "query_date": query_date,
-                "interval_minutes": 10,
-                "total_records": len(power_data) if power_data else 0,
+                "interval": "1 hour",
+                "total_records": len(structured.series) if structured else 0,
                 "units": {"power": "W", "soc": "%", "energy": "kWh"}
             },
             structured_data=structured
@@ -577,8 +619,24 @@ async def get_one_date_energy_data(query_date: str, serial: Optional[str] = None
         app_id, app_secret = get_alpha_credentials()
         client = alphaess(app_id, app_secret)
 
-        # Get one date energy data
-        energy_data = await client.getOneDateEnergyBySn(serial, query_date)
+        # Get one day power data
+        power_data = await client.getOneDayPowerBySn(serial, query_date)
+
+        # Structure the timeseries data
+        structured = structure_timeseries_data(power_data, serial)
+        
+        summary = structured.summary
+        
+        # Map the summary to the expected output format
+        energy_data = {
+            "eCharge": summary.battery.get('total_charge_kwh', 0),
+            "epv": summary.solar.get('total_generation_kwh', 0),
+            "eOutput": summary.grid.get('total_feedin_kwh', 0),
+            "eInput": summary.grid.get('total_import_kwh', 0),
+            "eGridCharge": summary.grid.get('total_charge_from_grid_kwh', 0),
+            "eDischarge": summary.battery.get('total_discharge_kwh', 0),
+            "eChargingPile": 0 # This data is not available in the summary
+        }
 
         return {
             "success": True,
